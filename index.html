@@ -1,0 +1,473 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jailbreaks</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:#111;color:white}
+button,input,textarea,select{font:inherit}
+button{cursor:pointer;border:0;border-radius:10px;padding:12px;background:#6c5ce7;color:white;margin:4px}
+input,textarea,select{width:100%;padding:12px;margin:8px 0;border-radius:10px;border:1px solid #444;background:#222;color:white}
+textarea{min-height:110px}
+.hidden{display:none!important}
+header{padding:16px;background:#181818;display:flex;justify-content:space-between;align-items:center}
+main{padding:16px;padding-bottom:100px;max-width:800px;margin:auto}
+.card{background:#1d1d1d;border:1px solid #333;padding:15px;border-radius:15px;margin:12px 0}
+img{max-width:100%;border-radius:12px}
+.preview{max-height:260px;object-fit:contain}
+nav{position:fixed;bottom:0;left:0;right:0;background:#181818;display:flex;justify-content:space-around;padding:10px}
+nav button{background:#222}
+.small{font-size:13px;color:#aaa}
+.actions{display:flex;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<header>
+<strong>Jailbreaks</strong>
+<img id="headerAvatar" class="hidden" style="width:38px;height:38px;object-fit:cover;border-radius:50%">
+<button id="logoutBtn" class="hidden">Logout</button>
+</header>
+
+<main>
+<section id="auth">
+<div class="card">
+<h2 id="authTitle">Sign up</h2>
+<input id="username" placeholder="Username">
+<input id="email" type="email" placeholder="Email">
+<input id="age" type="number" placeholder="Age">
+<input id="password" type="password" placeholder="Password">
+<button id="showPass">Show password</button>
+<button id="authBtn">Sign up</button>
+<button id="switchAuth">Already have an account? Login</button>
+<button id="googleBtn">Continue with Google</button>
+<button id="appleBtn">Continue with Apple</button>
+<p id="authMsg"></p>
+</div>
+</section>
+
+<section id="site" class="hidden">
+<div id="feedPage">
+<input id="search" placeholder="Search prompts">
+<div id="feed"></div>
+</div>
+
+<div id="createPage" class="hidden">
+<div class="card">
+<h2 id="createTitle">Create prompt</h2>
+<input id="promptTitle" placeholder="Prompt title">
+<textarea id="promptText" placeholder="Your prompt"></textarea>
+<textarea id="description" placeholder="Description"></textarea>
+<label>Choose an image from your phone</label>
+<input type="file" id="imageFile" accept="image/*">
+<img id="imagePreview" class="preview hidden">
+<button id="removeImage" class="hidden">Remove image</button>
+<select id="visibility">
+<option value="public">Public</option>
+<option value="private">Private</option>
+</select>
+<button id="savePrompt">Save prompt</button>
+<button id="cancelCreate">Cancel</button>
+<p id="createMsg"></p>
+</div>
+</div>
+
+<div id="minePage" class="hidden">
+<h2>My prompts</h2>
+<div id="mine"></div>
+</div>
+
+<div id="settingsPage" class="hidden">
+<div class="card">
+<h2>Settings</h2>
+<input type="file" id="avatarFile" accept="image/*">
+<button id="saveAvatar">Upload profile picture</button>
+<button id="theme">Toggle theme</button>
+<button id="addAccount">Add account</button>
+</div>
+</div>
+</section>
+</main>
+
+<nav id="nav" class="hidden">
+<button data-page="feedPage">Home</button>
+<button data-page="createPage">+</button>
+<button data-page="minePage">My prompts</button>
+<button data-page="settingsPage">Settings</button>
+</nav>
+
+<script>
+const SUPABASE_URL="https://oowirvsaqtjpcmksgfwd.supabase.co";
+const SUPABASE_KEY="sb_publishable_QnSkL_plGQCGI04xg24LZw_ZF-TrOJx";
+const db=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+
+let user=null;
+let editing=null;
+let selectedImage=null;
+let existingImage=null;
+let isSignup=true;
+
+const $=id=>document.getElementById(id);
+
+$("showPass").addEventListener("click",()=>{
+$("password").type=$("password").type==="password"?"text":"password";
+$("showPass").textContent=$("password").type==="password"?"Show password":"Hide password";
+});
+
+$("switchAuth").addEventListener("click",()=>{
+isSignup=!isSignup;
+$("authTitle").textContent=isSignup?"Sign up":"Login";
+$("authBtn").textContent=isSignup?"Sign up":"Login";
+$("switchAuth").textContent=isSignup?"Already have an account? Login":"Create an account";
+$("username").classList.toggle("hidden",!isSignup);
+$("age").classList.toggle("hidden",!isSignup);
+$("authMsg").textContent="";
+});
+
+$("authBtn").addEventListener("click",async()=>{
+$("authMsg").textContent="";
+const mail=$("email").value.trim();
+const pw=$("password").value;
+
+if(isSignup){
+const name=$("username").value.trim();
+const years=parseInt($("age").value);
+
+if(!name||!mail||!pw||!years){
+$("authMsg").textContent="Fill all fields.";
+return;
+}
+
+const {data,error}=await db.auth.signUp({
+email:mail,
+password:pw,
+options:{data:{username:name,age:years}}
+});
+
+if(error){$("authMsg").textContent=error.message;return;}
+
+if(data.user){
+user=data.user;
+if(data.session){
+const profileError=await createProfile(user,name,years);
+if(profileError){$("authMsg").textContent=profileError;return;}
+await loadSite();
+}else{
+$("authMsg").textContent="Account created. Log in after confirming your email if confirmation is enabled.";
+}
+}
+}else{
+const {data,error}=await db.auth.signInWithPassword({email:mail,password:pw});
+if(error){$("authMsg").textContent=error.message;return;}
+user=data.user;
+await loadSite();
+}
+});
+
+async function createProfile(u,name,years){
+const {error}=await db.from("profiles").upsert({
+id:u.id,
+username:name,
+age:years
+});
+return error?.message||null;
+}
+
+$("googleBtn").addEventListener("click",()=>socialLogin("google"));
+$("appleBtn").addEventListener("click",()=>socialLogin("apple"));
+
+async function socialLogin(provider){
+const {error}=await db.auth.signInWithOAuth({
+provider,
+options:{redirectTo:location.href}
+});
+if(error)$("authMsg").textContent=error.message;
+}
+
+async function uploadFile(file,bucket){
+if(!file)return null;
+if(file.size>8*1024*1024)throw new Error("Image must be smaller than 8 MB.");
+if(!file.type.startsWith("image/"))throw new Error("Please select an image.");
+
+const path=user.id+"/"+Date.now()+"_"+file.name.replace(/[^a-zA-Z0-9._-]/g,"_");
+
+const {data,error}=await db.storage.from(bucket).upload(path,file,{
+cacheControl:"3600",
+upsert:false
+});
+
+if(error)throw error;
+
+const {data:publicData}=db.storage.from(bucket).getPublicUrl(data.path);
+return publicData.publicUrl;
+}
+
+$("imageFile").addEventListener("change",()=>{
+selectedImage=$("imageFile").files[0]||null;
+if(selectedImage){
+$("imagePreview").src=URL.createObjectURL(selectedImage);
+$("imagePreview").classList.remove("hidden");
+$("removeImage").classList.remove("hidden");
+}else{
+$("imagePreview").classList.add("hidden");
+$("removeImage").classList.add("hidden");
+}
+});
+
+$("removeImage").addEventListener("click",()=>{
+selectedImage=null;
+$("imageFile").value="";
+$("imagePreview").src="";
+$("imagePreview").classList.add("hidden");
+$("removeImage").classList.add("hidden");
+});
+
+$("savePrompt").addEventListener("click",async()=>{
+$("createMsg").textContent="";
+const title=$("promptTitle").value.trim();
+const prompt=$("promptText").value.trim();
+const description=$("description").value.trim();
+
+if(!title||!prompt){
+$("createMsg").textContent="Title and prompt are required.";
+return;
+}
+
+$("savePrompt").disabled=true;
+$("createMsg").textContent="Saving...";
+
+try{
+let imageUrl=existingImage;
+if(selectedImage){
+imageUrl=await uploadFile(selectedImage,"prompt-images");
+}
+
+const record={
+user_id:user.id,
+title,
+prompt,
+description,
+image_url:imageUrl,
+is_public:$("visibility").value==="public"
+};
+
+let result;
+if(editing){
+result=await db.from("prompts").update(record).eq("id",editing).eq("user_id",user.id);
+}else{
+result=await db.from("prompts").insert(record);
+}
+
+if(result.error)throw result.error;
+
+resetCreate();
+await loadFeed();
+await loadMine();
+showPage("feedPage");
+}catch(e){
+$("createMsg").textContent=e.message||"Something went wrong.";
+}finally{
+$("savePrompt").disabled=false;
+}
+});
+
+function resetCreate(){
+editing=null;
+selectedImage=null;
+existingImage=null;
+$("promptTitle").value="";
+$("promptText").value="";
+$("description").value="";
+$("imageFile").value="";
+$("imagePreview").src="";
+$("imagePreview").classList.add("hidden");
+$("removeImage").classList.add("hidden");
+$("visibility").value="public";
+$("createTitle").textContent="Create prompt";
+$("createMsg").textContent="";
+}
+
+$("cancelCreate").addEventListener("click",()=>{
+resetCreate();
+showPage("feedPage");
+});
+
+async function loadFeed(){
+const {data,error}=await db.from("prompts").select("*").eq("is_public",true).order("created_at",{ascending:false});
+if(error){$("feed").textContent=error.message;return;}
+renderPrompts(data||[],$("feed"),false);
+}
+
+async function loadMine(){
+const {data,error}=await db.from("prompts").select("*").eq("user_id",user.id).order("created_at",{ascending:false});
+if(error){$("mine").textContent=error.message;return;}
+renderPrompts(data||[],$("mine"),true);
+}
+
+function renderPrompts(items,target,own){
+target.innerHTML="";
+for(const p of items){
+const card=document.createElement("div");
+card.className="card";
+
+const title=document.createElement("h3");
+title.textContent=p.title;
+card.appendChild(title);
+
+if(p.image_url){
+const im=document.createElement("img");
+im.src=p.image_url;
+im.alt="Prompt image";
+card.appendChild(im);
+}
+
+const desc=document.createElement("p");
+desc.textContent=p.description||"";
+card.appendChild(desc);
+
+const promptText=document.createElement("pre");
+promptText.style.whiteSpace="pre-wrap";
+promptText.textContent=p.prompt;
+card.appendChild(promptText);
+
+const actions=document.createElement("div");
+actions.className="actions";
+
+const copy=document.createElement("button");
+copy.textContent="Copy";
+copy.addEventListener("click",async()=>{
+await navigator.clipboard.writeText(p.prompt);
+copy.textContent="Copied!";
+setTimeout(()=>copy.textContent="Copy",1200);
+});
+actions.appendChild(copy);
+
+if(own){
+const edit=document.createElement("button");
+edit.textContent="Edit";
+edit.addEventListener("click",()=>{
+editing=p.id;
+existingImage=p.image_url;
+$("promptTitle").value=p.title;
+$("promptText").value=p.prompt;
+$("description").value=p.description||"";
+$("visibility").value=p.is_public?"public":"private";
+$("imagePreview").src=p.image_url||"";
+$("imagePreview").classList.toggle("hidden",!p.image_url);
+$("removeImage").classList.toggle("hidden",!p.image_url);
+$("createTitle").textContent="Edit prompt";
+showPage("createPage");
+});
+actions.appendChild(edit);
+
+const del=document.createElement("button");
+del.textContent="Delete";
+del.addEventListener("click",async()=>{
+if(!confirm("Delete this prompt?"))return;
+const {error}=await db.from("prompts").delete().eq("id",p.id).eq("user_id",user.id);
+if(error)alert(error.message);
+else{await loadMine();await loadFeed();}
+});
+actions.appendChild(del);
+}
+
+card.appendChild(actions);
+target.appendChild(card);
+}
+}
+
+$("search").addEventListener("input",async()=>{
+const q=$("search").value.trim();
+if(!q){await loadFeed();return;}
+const {data,error}=await db.from("prompts").select("*").eq("is_public",true).or("title.ilike.%"+q+"%,description.ilike.%"+q+"%,prompt.ilike.%"+q+"%").order("created_at",{ascending:false});
+if(error){$("feed").textContent=error.message;return;}
+renderPrompts(data||[],$("feed"),false);
+});
+
+async function loadAvatar(){
+const {data}=await db.from("profiles").select("avatar_url").eq("id",user.id).maybeSingle();
+if(data?.avatar_url){
+$("headerAvatar").src=data.avatar_url;
+$("headerAvatar").classList.remove("hidden");
+}
+}
+
+$("saveAvatar").addEventListener("click",async()=>{
+const file=$("avatarFile").files[0];
+if(!file){alert("Choose a picture first.");return;}
+try{
+const url=await uploadFile(file,"avatars");
+const {error}=await db.from("profiles").update({avatar_url:url}).eq("id",user.id);
+if(error)throw error;
+$("headerAvatar").src=url;
+$("headerAvatar").classList.remove("hidden");
+alert("Profile picture uploaded.");
+}catch(e){alert(e.message);}
+});
+
+$("theme").addEventListener("click",()=>{
+document.body.style.background=document.body.style.background==="white"?"#111":"white";
+document.body.style.color=document.body.style.color==="black"?"white":"black";
+});
+
+$("addAccount").addEventListener("click",async()=>{
+await db.auth.signOut();
+location.reload();
+});
+
+$("logoutBtn").addEventListener("click",async()=>{
+await db.auth.signOut();
+location.reload();
+});
+
+$("nav").addEventListener("click",e=>{
+const btn=e.target.closest("button[data-page]");
+if(btn)showPage(btn.dataset.page);
+});
+
+function showPage(page){
+for(const id of ["feedPage","createPage","minePage","settingsPage"]){
+$(id).classList.toggle("hidden",id!==page);
+}
+if(page==="minePage")loadMine();
+if(page==="createPage"&&!editing){
+$("createTitle").textContent="Create prompt";
+}
+}
+
+async function loadSite(){
+const {data}=await db.auth.getUser();
+user=data.user;
+if(!user)return;
+
+$("auth").classList.add("hidden");
+$("site").classList.remove("hidden");
+$("nav").classList.remove("hidden");
+$("logoutBtn").classList.remove("hidden");
+
+await loadFeed();
+await loadMine();
+await loadAvatar();
+showPage("feedPage");
+}
+
+db.auth.onAuthStateChange(async(event,session)=>{
+if(session?.user&&!user){
+user=session.user;
+setTimeout(()=>loadSite(),0);
+}
+});
+
+(async()=>{
+const {data}=await db.auth.getSession();
+if(data.session){
+user=data.session.user;
+await loadSite();
+}
+})();
+</script>
+</body>
+</html>
